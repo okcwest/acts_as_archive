@@ -7,3 +7,4 @@ acts_as_archive:
     framework_fixture: "=0.1.3"
     mover: "=0.3.6"
     rack-test: "~>0"
+
