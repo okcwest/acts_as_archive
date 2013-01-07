@@ -113,11 +113,11 @@ class ActsAsArchive
           klass = eval(options[:class]) rescue nil
           
           if klass
-            klass.send :set_table_name, options[:table]
+            klass.send :table_name=, options[:table]
           else
             eval <<-EVAL
               class ::#{options[:class]} < ActiveRecord::Base
-                set_table_name "#{options[:table]}"
+                self.table_name = "#{options[:table]}"
               end
             EVAL
             klass = eval("::#{options[:class]}")
@@ -127,10 +127,10 @@ class ActsAsArchive
           klass.acts_as_archive(:class => self, :archive => true)
         
           self.reflect_on_all_associations.each do |association|
-            if !ActsAsArchive.find(association.klass).empty? && association.options[:dependent]
+            if association.options[:dependent] && !association.options[:polymorphic] && !ActsAsArchive.find(association.klass).empty?
               opts = association.options.dup
               opts[:class_name] = "::#{association.class_name}::Archive"
-              opts[:foreign_key] = association.primary_key_name
+              opts[:foreign_key] = association.respond_to?(:foreign_key) ? association.foreign_key : association.primary_key_name
               klass.send association.macro, association.name, opts
             end
           end
@@ -194,19 +194,22 @@ class ActsAsArchive
       unless base.included_modules.include?(InstanceMethods)
         base.send :include, InstanceMethods
         base.class_eval do
-          unless method_defined?(:delete_sql_without_archive)
-            alias_method :delete_sql_without_archive, :delete_sql
-            alias_method :delete_sql, :delete_sql_with_archive
+          unless method_defined?(:delete_without_archive)
+            alias_method :delete_without_archive, :delete
+            alias_method :delete, :delete_with_archive
           end
         end
       end
     end
     
     module InstanceMethods
-      def delete_sql_with_archive(sql, name = nil)
+      def delete_with_archive(arel, name=nil, binds=[])
         @mutex ||= Mutex.new
         @mutex.synchronize do
           unless ActsAsArchive.disabled
+            bdup = binds.dup
+            sql = to_sql(arel, bdup)
+
             from, where = /DELETE FROM (.+)/i.match(sql)[1].split(/\s+WHERE\s+/i, 2)
             from = from.strip.gsub(/[`"]/, '').split(/\s*,\s*/)
         
@@ -216,7 +219,7 @@ class ActsAsArchive
           end
         end
         
-        delete_sql_without_archive(sql, name)
+        delete_without_archive(arel, name, binds)
       end
     end
   end
